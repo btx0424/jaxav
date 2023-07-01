@@ -20,7 +20,7 @@ def render(states: Sequence[DroneState]):
     
     arms = np.stack([np.zeros_like(state.rotor_trans), state.rotor_trans], -2)
     arms = transform(arms)
-    
+
     for i, drone_i_arms in enumerate(arms):
         lines = []
         for arm in drone_i_arms:

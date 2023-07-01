@@ -28,6 +28,7 @@ class Transform:
         vec = pos + jax.vmap(quat_rotate)(vec.reshape(-1, 3), rot)
         return vec.reshape(*shape, 3)
 
+
 @struct.dataclass
 class DroneState:
     # kinematic state
@@ -54,6 +55,9 @@ class DroneState:
     def thrust2weight(self, g):
         
         return 
+
+    def __getitem__(self, index):
+        return jax.tree_map(lambda x: x[index], self)
 
 
     @classmethod

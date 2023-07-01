@@ -1,8 +1,9 @@
 import jax
 import jax.numpy as jnp
+from jax.typing import ArrayLike
 from typing import Optional, Union, Tuple
 
-def quat_inv(quat: jnp.ndarray):
+def quat_inv(quat: ArrayLike):
     """Calculates the inverse of quaternion q.
 
     Args:
@@ -14,7 +15,7 @@ def quat_inv(quat: jnp.ndarray):
     return quat * jnp.array([1, -1, -1, -1])
 
 
-def quat_mul(u: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
+def quat_mul(u: ArrayLike, v: ArrayLike) -> ArrayLike:
     """Multiplies two quaternions.
 
     Args:
@@ -32,7 +33,7 @@ def quat_mul(u: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
     ])
     
 
-def quat_rotate(vec: jnp.ndarray, quat: jnp.ndarray, inv: bool=False):
+def quat_rotate(vec: ArrayLike, quat: ArrayLike, inv: bool=False):
     """Rotates a vector vec by a unit quaternion quat.
 
     Args:
@@ -54,7 +55,7 @@ def quat_rotate(vec: jnp.ndarray, quat: jnp.ndarray, inv: bool=False):
     return r
 
 
-def ang_to_quat(ang: jnp.ndarray):
+def ang_to_quat(ang: ArrayLike):
     """Converts angular velocity to a quaternion.
 
     Args:
@@ -66,7 +67,7 @@ def ang_to_quat(ang: jnp.ndarray):
     return jnp.array([0, ang[0], ang[1], ang[2]])
 
 
-def quat_to_euler(quat: jnp.ndarray):
+def quat_to_euler(quat: ArrayLike):
     w, x, y, z = quat
     euler_angles = jnp.array([
         jnp.arctan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y)),
@@ -76,7 +77,7 @@ def quat_to_euler(quat: jnp.ndarray):
     return euler_angles
 
 
-# def euler_to_quat(rpy: jnp.ndarray):
+# def euler_to_quat(rpy: ArrayLike):
 #     c1, c2, c3 = jnp.cos(rpy)
 #     s1, s2, s3 = jnp.sin(rpy)
 #     w = c1 * c2 * c3 - s1 * s2 * s3
@@ -86,7 +87,7 @@ def quat_to_euler(quat: jnp.ndarray):
 #     return jnp.array([w, x, y, z])
 
 
-def euler_to_quat(euler: jnp.ndarray):
+def euler_to_quat(euler: ArrayLike):
     r, p, y = euler
     cy = jnp.cos(y * 0.5)
     sy = jnp.sin(y * 0.5)
@@ -104,7 +105,7 @@ def euler_to_quat(euler: jnp.ndarray):
 
     return quaternion
 
-def quat_to_matrix(quat: jnp.ndarray):
+def quat_to_matrix(quat: ArrayLike):
     """Converts quaternion to 3x3 rotation matrix."""
     d = jnp.dot(quat, quat)
     w, x, y, z = quat
@@ -119,7 +120,7 @@ def quat_to_matrix(quat: jnp.ndarray):
         [xz - wy, yz + wx, 1 - (xx + yy)],
     ])
 
-# def quat_to_matrix(quat: jnp.ndarray):
+# def quat_to_matrix(quat: ArrayLike):
 
 #     w, x, y, z = quat
 #     tx = 2.0 * x
@@ -152,8 +153,8 @@ def quat_to_matrix(quat: jnp.ndarray):
 #     return matrix
 
 def safe_norm(
-    x: jnp.ndarray, axis: Optional[Union[Tuple[int, ...], int]] = None
-) -> jnp.ndarray:
+    x: ArrayLike, axis: Optional[Union[Tuple[int, ...], int]] = None
+) -> ArrayLike:
     """Calculates a linalg.norm(x) that's safe for gradients at x=0.
 
     Avoids a poorly defined gradient for jnp.linal.norm(0) see
@@ -174,8 +175,8 @@ def safe_norm(
     return n
 
 # def normalize(
-#     x: jnp.ndarray, axis: Optional[Union[Tuple[int, ...], int]] = None
-# ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+#     x: ArrayLike, axis: Optional[Union[Tuple[int, ...], int]] = None
+# ) -> Tuple[ArrayLike, ArrayLike]:
 #     """Normalizes an array.
 
 #     Args:
@@ -189,6 +190,11 @@ def safe_norm(
 #     n = x / (norm + 1e-6 * (norm == 0.0))
 #     return n, norm
 
-def normalize(x: jnp.ndarray):
+def normalize(x: ArrayLike):
     norm = jnp.linalg.norm(x, axis=-1)
     return x / (norm + 1e-6), norm
+
+
+def lerp(start: ArrayLike, end: ArrayLike, weight: Union[ArrayLike, float]):
+    return start + (end - start) * weight
+
