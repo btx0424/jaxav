@@ -29,8 +29,7 @@ class Transition:
     # policy
     policy_output: Any
     policy_state: Any = None
-    next_policy_state: Any = None
-    
+
 
 class RolloutWrapper:
     def __init__(self, env: EnvBase, policy: Callable):
@@ -38,31 +37,58 @@ class RolloutWrapper:
         self.policy = policy
     
     def rollout(self, steps: int, env_param, policy_param, init, key):
+        if len(init) == 2:
+            def rollout_step(step_input, _):
+                (obs, env_state), key = step_input
+                key, subkey = jax.random.split(key)
+                action, policy_output = self.policy(obs, env_state, policy_param, subkey)
+                next_obs, reward, done, next_state = self.env.step(env_state, action)
+                output = Transition(obs, action, next_obs, reward, done, env_state, next_state, policy_output)
+                next_obs, next_state = jax.lax.cond(
+                    done, 
+                    self.env.reset,
+                    lambda env_param, key: (next_obs, next_state),
+                    env_param, subkey
+                )
+                carry = ((next_obs, next_state), key)
+                return carry, output
 
-        def rollout_step(step_input, _):
-            (obs, env_state), key = step_input
-            key, subkey = jax.random.split(key)
-            action, policy_output = self.policy(obs, env_state, policy_param, subkey)
-            next_obs, reward, done, next_state = self.env.step(env_state, action)
-            output = Transition(obs, action, next_obs, reward, done, env_state, next_state, policy_output)
-            next_obs, next_state = jax.lax.cond(
-                done, 
-                self.env.reset,
-                lambda env_param, key: (next_obs, next_state),
-                env_param, subkey
+            (carry, _), output = jax.lax.scan(
+                f=rollout_step,
+                init=(init, key),
+                xs=(),
+                length=steps
             )
-            carry = ((next_obs, next_state), key)
-            return carry, output
-        
-        if init is None:
-            init = self.env.reset(env_param, key)
+        elif len(init) == 3:
+            def rollout_step(step_input, _):
+                (obs, env_state, policy_state), key = step_input
+                key, subkey = jax.random.split(key)
+                action, policy_output, policy_state = self.policy(
+                    obs, env_state, policy_state, policy_param, subkey
+                )
+                next_obs, reward, done, next_state = self.env.step(env_state, action)
+                output = Transition(
+                    obs, action, next_obs, reward, done, env_state, next_state, 
+                    policy_output=policy_output,
+                    policy_state=policy_state
+                )
+                next_obs, next_state = jax.lax.cond(
+                    done, 
+                    self.env.reset,
+                    lambda env_param, key: (next_obs, next_state),
+                    env_param, subkey
+                )
+                carry = ((next_obs, next_state, policy_state), key)
+                return carry, output
 
-        (carry, _), output = jax.lax.scan(
-            f=rollout_step,
-            init=(init, key),
-            xs=(),
-            length=steps
-        )
+            (carry, _), output = jax.lax.scan(
+                f=rollout_step,
+                init=(init, key),
+                xs=(),
+                length=steps
+            )
+        else:
+            raise ValueError
         return carry, output
 
 

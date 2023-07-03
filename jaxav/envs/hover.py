@@ -24,11 +24,11 @@ class EnvState:
 class Hover(EnvBase):
     def __init__(
         self, 
-        drone_model: str
+        drone_model: str,
     ):
         self.template_state = DroneState.load(drone_model)
         self.target_pos = jnp.array([0., 0., 2.5])
-        self.observation_space = Box(-jnp.inf, jnp.inf, (13,))
+        self.observation_space = Box(-jnp.inf, jnp.inf, (14,))
         self.action_space = Box(-1, 1, (4,))
     
     def init(self, key):
@@ -79,7 +79,8 @@ class Hover(EnvBase):
             self.target_pos - env_state.drone.pos,
             env_state.drone.rot,
             env_state.drone.vel,
-            env_state.drone.angvel
+            env_state.drone.angvel,
+            jnp.array([env_state.step / env_state.max_episode_len])
         ])
         return obs
     
