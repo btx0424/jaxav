@@ -2,14 +2,28 @@ import jax
 import jax.numpy as jnp
 
 from flax import struct
-from typing import Callable, Any
+from typing import Callable, Any, Dict
+
+
+@struct.dataclass
+class EnvState:
+    max_episode_len: int
+    is_init: bool = True
+    step: int = 0
+    Return: float = jnp.array([0.])
+    
+    metrics: Dict[str, Any] = struct.field(default_factory=dict)
+    info: Dict[str, Any] = struct.field(default_factory=dict)
 
 
 class EnvBase:
     def __init__(self) -> None:
         pass
+    
+    def init(self, key: jax.random.KeyArray):
+        pass
 
-    def step(self, state, action):
+    def step(self, state: EnvState, action):
         pass
 
     def reset(self, env_params, key: jax.random.KeyArray):
@@ -45,7 +59,7 @@ class RolloutWrapper:
                 next_obs, reward, done, next_state = self.env.step(env_state, action)
                 output = Transition(obs, action, next_obs, reward, done, env_state, next_state, policy_output)
                 next_obs, next_state = jax.lax.cond(
-                    done, 
+                    done.all(-1), 
                     self.env.reset,
                     lambda env_param, key: (next_obs, next_state),
                     env_param, subkey
@@ -73,7 +87,7 @@ class RolloutWrapper:
                     policy_state=policy_state
                 )
                 next_obs, next_state = jax.lax.cond(
-                    done, 
+                    done.all(-1), 
                     self.env.reset,
                     lambda env_param, key: (next_obs, next_state),
                     env_param, subkey
@@ -91,17 +105,3 @@ class RolloutWrapper:
             raise ValueError
         return carry, output
 
-
-class EnvTransform:
-    def __init__(self) -> None:
-        pass
-
-
-class Compose(EnvTransform):
-    def __init__(self) -> None:
-        super().__init__()
-
-
-class TransformedEnv(EnvBase):
-    def __init__(self, env, transform: EnvTransform):
-        pass

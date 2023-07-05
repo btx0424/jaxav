@@ -14,7 +14,7 @@ from optax._src.linear_algebra import global_norm
 import tensorflow_probability.substrates.jax.distributions as D
 
 from jaxav.base import Transition
-from jaxav.learning.common import GAE, ValueNorm, RunningStats, MLP
+from jaxav.learning.common import GAE, ValueNorm, RunningStats
 from typing import Callable, Any, Tuple
 
 
@@ -23,15 +23,42 @@ class ActorCritic(nn.Module):
     activation: str = "elu"
 
     @nn.compact
-    def __call__(self, x):        
-        actor_mean = MLP([256, 256], self.activation)(x)
+    def __call__(self, x):
+        activation = getattr(nn, self.activation)
+        actor_mean = nn.Sequential([
+            nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)),
+            nn.Conv(features=64, kernel_size=[5], strides=2),
+            activation,
+            nn.Conv(features=64, kernel_size=[5], strides=2),
+            activation,
+            nn.Conv(features=64, kernel_size=[5], strides=2),
+            lambda x: jnp.reshape(x, (*x.shape[:-2], -1)),
+        ])(x)
+        actor_mean = activation(actor_mean)
+        actor_mean = nn.Dense(
+            256, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
+        )(actor_mean)
+        actor_mean = activation(actor_mean)
         actor_mean = nn.Dense(
             self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
         )(actor_mean)
         actor_logtstd = self.param("log_std", nn.initializers.zeros, (self.action_dim,))
         pi = D.MultivariateNormalDiag(actor_mean, jnp.exp(actor_logtstd))
         
-        critic = MLP([256, 256], self.activation)(x)
+        critic = nn.Sequential([
+            nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)),
+            nn.Conv(features=64, kernel_size=[5], strides=2),
+            activation,
+            nn.Conv(features=64, kernel_size=[5], strides=2),
+            activation,
+            nn.Conv(features=64, kernel_size=[5], strides=2),
+            lambda x: jnp.reshape(x, (*x.shape[:-2], -1)),
+        ])(x)
+        critic = activation(critic)
+        critic = nn.Dense(
+            256, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
+        )(critic)
+        critic = activation(critic)
         critic = nn.Dense(
             1, kernel_init=orthogonal(1.0), bias_init=constant(0.0)
         )(critic)
@@ -47,7 +74,7 @@ class PPOPolicyOutput:
 class PPOTrainState(TrainState):
     value_stats: RunningStats
 
-class PPOPolicy:
+class PPOPolicyTCN:
 
     def __init__(self, cfg):
         self.cfg = cfg
@@ -63,15 +90,18 @@ class PPOPolicy:
             optax.clip_by_global_norm(10.),
             optax.adam(learning_rate=self.cfg.lr)
         )
+        def apply_fn(params, obs):
+            return self.network.apply(params, jnp.swapaxes(obs, -2, -1))
         train_state = PPOTrainState.create(
-            apply_fn=self.network.apply,
-            params=self.network.init(key, obs),
+            apply_fn=apply_fn,
+            params=self.network.init(key, jnp.swapaxes(obs, -2, -1)),
             tx=tx,
             value_stats=RunningStats.zero()
         )
         return train_state
 
     def __call__(self, obs, env_state, params, key):
+        obs = jnp.swapaxes(obs, -2, -1)
         pi, value = self.network.apply(params, obs)
         action = pi.sample(seed=key)
         log_prob = pi.log_prob(action)
@@ -99,8 +129,6 @@ class PPOPolicy:
         else:
             advantages, returns = jax.vmap(self.gae)(reward, value, done, next_val)
 
-        advantages = (advantages - jnp.mean(advantages)) / jnp.std(advantages)
-
         batch = (traj_batch, advantages, returns)
         minibatches = self._make_minibatches(batch, key)
         train_state, _info = jax.lax.scan(
@@ -126,7 +154,7 @@ class PPOPolicy:
         transition, advantages, returns = minibatch
 
         def loss_fn(params, transition, advantages, returns):
-            pi, value = self.network.apply(params, transition.obs)
+            pi, value = train_state.apply_fn(params, transition.obs)
             log_prob = pi.log_prob(transition.action)
 
             # CALCULATE VALUE LOSS
@@ -148,7 +176,7 @@ class PPOPolicy:
             loss_actor = loss_actor.mean()
             entropy = pi.entropy().mean()
 
-            total_loss = loss_actor + value_loss
+            total_loss = loss_actor + value_loss - self.entropy_coef * entropy
             explained_var = 1. - jnp.mean(value_losses) / jnp.var(returns)
             return (
                 total_loss, 

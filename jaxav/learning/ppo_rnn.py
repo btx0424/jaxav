@@ -13,9 +13,11 @@ from optax._src.linear_algebra import global_norm
 
 import tensorflow_probability.substrates.jax.distributions as D
 
-from jaxav.base import Transition
 from typing import Callable, Any, Tuple
-from jaxav.learning.ppo import PPOPolicyOutput, GAE
+
+from jaxav.base import Transition
+from jaxav.learning.common import GAE
+from jaxav.learning.ppo import PPOPolicyOutput
 
 
 class ScannedRNN(nn.Module):

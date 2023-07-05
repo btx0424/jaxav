@@ -1,0 +1,6 @@
+wandb:
+  project: jaxav
+  mode: online
+
+defaults:
+  - algo: ppo

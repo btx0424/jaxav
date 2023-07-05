@@ -1,0 +1,5 @@
+
+lr: 5e-4
+clip_eps: 0.1
+num_minibatches: 8
+entropy_coef: 1e-3

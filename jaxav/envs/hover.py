@@ -1,4 +1,4 @@
-from jaxav.base import EnvBase
+from jaxav.base import EnvBase, EnvState as _EnvState
 from jaxav.dynamics import DroneState, step
 from jaxav.math import euler_to_quat, lerp
 
@@ -11,15 +11,8 @@ from gymnax.environments.spaces import Box
 from typing import Any
 
 @struct.dataclass
-class EnvState:
-    drone: DroneState
-
-    max_episode_len: int
-    metrics: Any
-    is_init: bool = True
-    step: int = 0
-    Return: float = 0.
-
+class EnvState(_EnvState):
+    drone: DroneState = None
 
 class Hover(EnvBase):
     def __init__(
@@ -28,7 +21,7 @@ class Hover(EnvBase):
     ):
         self.template_state = DroneState.load(drone_model)
         self.target_pos = jnp.array([0., 0., 2.5])
-        self.observation_space = Box(-jnp.inf, jnp.inf, (14,))
+        self.observation_space = Box(-jnp.inf, jnp.inf, (17,))
         self.action_space = Box(-1, 1, (4,))
     
     def init(self, key):
@@ -48,9 +41,12 @@ class Hover(EnvBase):
             rot=euler_to_quat(init_rpy_dist.sample(seed=key))
         )
         env_state = EnvState(
-            drone_state, 
+            drone=drone_state, 
             max_episode_len=500,
-            metrics={"pos_error": 0., "episode_len": 0}
+            metrics={
+                "pos_error": jnp.array([0.]), 
+                "episode_len": 0
+            }
         )
         obs = self._obs(env_state)
         return obs, env_state
@@ -80,12 +76,12 @@ class Hover(EnvBase):
             env_state.drone.rot,
             env_state.drone.vel,
             env_state.drone.angvel,
-            jnp.array([env_state.step / env_state.max_episode_len])
+            jnp.full(4, env_state.step / env_state.max_episode_len)
         ])
         return obs
     
     def _reward_and_done(self, env_state: EnvState):
-        distance = jnp.linalg.norm(self.target_pos - env_state.drone.pos)
+        distance = jnp.linalg.norm(self.target_pos - env_state.drone.pos, keepdims=True)
         reward = jnp.exp(-distance)
         done = (
             (env_state.step > env_state.max_episode_len)
