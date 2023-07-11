@@ -28,17 +28,22 @@ def render(states: Sequence[DroneState]):
             lines.append(line)
         drone_arms[i] = lines
 
-    # for i, pos in state.pos:
-    #     ...
+    for i, pos in enumerate(state.pos):
+        trajs[i] = (ax.plot(*pos.T)[0], [pos])
     
     def update(state: DroneState):
         transform = Transform(pos=state.pos, rot=state.rot)
         arms = transform(np.stack([np.zeros_like(state.rotor_trans), state.rotor_trans], -2))
         for i, drone_i_arms in enumerate(arms):
-            lines = drone_arms[i]
-            for line, arm in zip(lines, drone_i_arms):
-                line.set_data(*arm.T[:2])
-                line.set_3d_properties(arm.T[2])
+            arm_lines = drone_arms[i]
+            for arm_line, arm in zip(arm_lines, drone_i_arms):
+                arm_line.set_data(*arm.T[:2])
+                arm_line.set_3d_properties(arm.T[2])
+            traj_line, traj = trajs[i]
+            traj.append(state.pos[i])
+            xyz = np.array(traj)
+            traj_line.set_data(*xyz.T[:2])
+            traj_line.set_3d_properties(xyz.T[2])
     
     anim = animation.FuncAnimation(
         fig, update, states[1:]

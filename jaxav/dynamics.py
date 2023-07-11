@@ -2,15 +2,14 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from flax import struct
-from .math import quat_mul, quat_rotate, normalize
-from typing import Optional, Union
+from jax.typing import ArrayLike
+from .utils.math import quat_mul, quat_rotate, normalize
 
-Array = Union[jnp.ndarray, np.ndarray]
 
 @struct.dataclass
 class Transform:
-    pos: Array
-    rot: Array
+    pos: ArrayLike
+    rot: ArrayLike
 
     @classmethod
     def zero(cls, shape):
@@ -21,7 +20,7 @@ class Transform:
             rot=jnp.zeros((*shape, 4)).at[..., 0].set(1.)
         )
 
-    def __call__(self, vec: Array):
+    def __call__(self, vec: ArrayLike):
         shape = jnp.broadcast_shapes(vec.shape[:-1], self.rot.shape[:-1])
         pos = jnp.broadcast_to(self.pos, (*shape, 3)).reshape(-1, 3)
         rot = jnp.broadcast_to(self.rot, (*shape, 4)).reshape(-1, 4)
@@ -32,24 +31,24 @@ class Transform:
 @struct.dataclass
 class DroneState:
     # kinematic state
-    pos: Array
-    rot: Array
-    vel: Array
-    angvel: Array
+    pos: ArrayLike
+    rot: ArrayLike
+    vel: ArrayLike
+    angvel: ArrayLike
 
     # params
-    mass: Array
-    inertia: Array
-    kf: Array
-    km: Array
-    rotor_max_rot: Array
-    rotor_trans: Array
-    rotor_rot: Array 
-    rotor_dir: Array
+    mass: ArrayLike
+    inertia: ArrayLike
+    kf: ArrayLike
+    km: ArrayLike
+    rotor_max_rot: ArrayLike
+    rotor_trans: ArrayLike
+    rotor_rot: ArrayLike 
+    rotor_dir: ArrayLike
 
     # throttle
-    a: Array
-    thro: Array
+    a: ArrayLike
+    thro: ArrayLike
 
 
     def thrust2weight(self, g):
@@ -97,8 +96,20 @@ class DroneState:
             a=jnp.array(0.5), thro=jnp.zeros(len(arm_lengths))
         )
 
+    @property
+    def up(self):
+        rot = self.rot.reshape(-1, 4)
+        up = jax.vmap(quat_rotate, (None, 0))(jnp.array([0., 0., 1.]), rot)
+        return jnp.reshape(up, (*self.rot.shape[:-1], 3))
+    
+    @property
+    def heading(self):
+        rot = self.rot.reshape(-1, 4)
+        heading = jax.vmap(quat_rotate, (None, 0))(jnp.array([1., 0., 0.]), rot)
+        return jnp.reshape(heading, (*self.rot.shape[:-1], 3))
 
-def step(state: DroneState, target_thro: jnp.ndarray, dt: float=0.02):
+
+def step(state: DroneState, target_thro: ArrayLike, dt: float=0.02):
     if not target_thro.ndim == 1:
         raise ValueError
 
@@ -107,16 +118,16 @@ def step(state: DroneState, target_thro: jnp.ndarray, dt: float=0.02):
 
     tmp = (thro * state.rotor_max_rot) ** 2
     thrust = tmp * state.kf
-    force = jnp.zeros((thro.shape[0], 3)).at[:, 2].set(thrust)
-    force = jax.vmap(quat_rotate)(force, state.rotor_rot)
+    force_body = jnp.zeros((thro.shape[0], 3)).at[:, 2].set(thrust)
+    force_world = jax.vmap(quat_rotate)(force_body, state.rotor_rot)
 
     moment = tmp * state.km * -state.rotor_dir
     torque = jnp.zeros((thro.shape[0], 3)).at[:, 2].set(moment)
     torque = jax.vmap(quat_rotate)(torque, state.rotor_rot)
-    torque += jnp.cross(force, -state.rotor_trans)
+    torque += jnp.cross(force_body, -state.rotor_trans)
 
     g = jnp.array([0., 0., -9.8])
-    acc = quat_rotate(jnp.sum(force, 0), state.rot) / state.mass + g
+    acc = quat_rotate(jnp.sum(force_world, 0), state.rot) / state.mass + g
     angacc = jnp.sum(torque, 0) / state.inertia
 
     vel = state.vel + dt * acc

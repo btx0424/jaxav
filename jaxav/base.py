@@ -3,17 +3,19 @@ import jax.numpy as jnp
 
 from flax import struct
 from typing import Callable, Any, Dict
-
+from dataclasses import field
 
 @struct.dataclass
 class EnvState:
     max_episode_len: int
-    is_init: bool = True
-    step: int = 0
-    Return: float = jnp.array([0.])
     
-    metrics: Dict[str, Any] = struct.field(default_factory=dict)
-    info: Dict[str, Any] = struct.field(default_factory=dict)
+    dt: float = field(default=0.02, kw_only=True)
+    is_init: bool = field(default=True, kw_only=True)
+    step: int = field(default=0, kw_only=True)
+    Return: float = field(default=jnp.array([0.]), kw_only=True)
+    
+    metrics: Dict[str, Any] = field(default_factory=dict, kw_only=True)
+    info: Dict[str, Any] = field(default_factory=dict, kw_only=True)
 
 
 class EnvBase:
@@ -45,12 +47,29 @@ class Transition:
     policy_state: Any = None
 
 
-class RolloutWrapper:
-    def __init__(self, env: EnvBase, policy: Callable):
+class RolloutWrapperV0:
+    def __init__(
+        self, 
+        env: EnvBase, 
+        policy: Callable, 
+        steps_per_iter: int
+    ):
         self.env = env
         self.policy = policy
+        self.steps_per_iter = steps_per_iter
     
-    def rollout(self, steps: int, env_param, policy_param, init, key):
+    def init(self, env_params, key):
+        obs, env_state = self.env.reset(env_params, key)
+        if hasattr(self.policy, "reset"): 
+            # stateful poicy, e.g., RNN, PID controller
+            policy_state = self.policy.reset(key)
+            carry = (obs, env_state, policy_state)
+        else:
+            # stateless policy
+            carry = (obs, env_state)
+        return carry
+        
+    def rollout(self, env_param, policy_param, init, key):
         if len(init) == 2:
             def rollout_step(step_input, _):
                 (obs, env_state), key = step_input
@@ -66,13 +85,6 @@ class RolloutWrapper:
                 )
                 carry = ((next_obs, next_state), key)
                 return carry, output
-
-            (carry, _), output = jax.lax.scan(
-                f=rollout_step,
-                init=(init, key),
-                xs=(),
-                length=steps
-            )
         elif len(init) == 3:
             def rollout_step(step_input, _):
                 (obs, env_state, policy_state), key = step_input
@@ -94,14 +106,13 @@ class RolloutWrapper:
                 )
                 carry = ((next_obs, next_state, policy_state), key)
                 return carry, output
-
-            (carry, _), output = jax.lax.scan(
-                f=rollout_step,
-                init=(init, key),
-                xs=(),
-                length=steps
-            )
         else:
             raise ValueError
+        (carry, _), output = jax.lax.scan(
+            f=rollout_step,
+            init=(init, key),
+            xs=(),
+            length=self.steps_per_iter
+        )
         return carry, output
 

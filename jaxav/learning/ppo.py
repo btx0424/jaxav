@@ -54,11 +54,11 @@ class PPOPolicy:
         self.clip_eps = self.cfg.clip_eps
         self.num_minibatches = self.cfg.num_minibatches
         self.entropy_coef = self.cfg.entropy_coef
-
-    def init(self, obs, key):
         self.network = ActorCritic(4, activation="elu")
         self.value_norm = ValueNorm()
         self.gae = GAE(0.99, 0.95)
+
+    def init(self, obs, key):
         tx = optax.chain(
             optax.clip_by_global_norm(10.),
             optax.adam(learning_rate=self.cfg.lr)

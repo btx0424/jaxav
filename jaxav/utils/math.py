@@ -198,3 +198,10 @@ def normalize(x: ArrayLike):
 def lerp(start: ArrayLike, end: ArrayLike, weight: Union[ArrayLike, float]):
     return start + (end - start) * weight
 
+
+def uniform(key: jax.random.KeyArray, low: ArrayLike, high: ArrayLike):
+    return jax.random.uniform(key) * (high-low) + low
+
+def sign(key: jax.random.KeyArray):
+    return jnp.sign(jax.random.normal(key))
+

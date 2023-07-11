@@ -6,7 +6,7 @@ from typing import Sequence
 from flax import struct
 from flax import linen as nn
 
-from jaxav.math import lerp
+from jaxav.utils.math import lerp
 
 @struct.dataclass
 class GAE:

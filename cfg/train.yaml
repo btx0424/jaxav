@@ -1,6 +1,13 @@
+hydra.job.chdir: false
+
 wandb:
   project: jaxav
   mode: online
 
+env:
+  name: Hover
+  num_envs: 1024
+
 defaults:
+  - _self_
   - algo: ppo

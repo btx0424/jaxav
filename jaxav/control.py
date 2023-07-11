@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 from flax import struct
-from jaxav.math import quat_to_matrix, quat_to_euler, normalize
+from jaxav.utils.math import quat_to_matrix, quat_to_euler, normalize
 
 @struct.dataclass
 class RateControllerParam:

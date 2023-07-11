@@ -1,6 +1,6 @@
 from jaxav.base import EnvBase, EnvState as _EnvState
 from jaxav.dynamics import DroneState, step
-from jaxav.math import euler_to_quat, lerp
+from jaxav.utils.math import euler_to_quat, lerp
 
 import jax
 import jax.numpy as jnp
@@ -44,7 +44,7 @@ class Hover(EnvBase):
             drone=drone_state, 
             max_episode_len=500,
             metrics={
-                "pos_error": jnp.array([0.]), 
+                "pos_error": jnp.array(0.), 
                 "episode_len": 0
             }
         )
@@ -81,15 +81,15 @@ class Hover(EnvBase):
         return obs
     
     def _reward_and_done(self, env_state: EnvState):
-        distance = jnp.linalg.norm(self.target_pos - env_state.drone.pos, keepdims=True)
-        reward = jnp.exp(-distance)
+        distance = jnp.linalg.norm(self.target_pos - env_state.drone.pos)
+        reward = jnp.exp(-distance)[None]
         done = (
-            (env_state.step > env_state.max_episode_len)
+            (env_state.step == env_state.max_episode_len)
             | (distance > 4.)
-        )
+        )[None]
         metrics = {
             "pos_error": lerp(env_state.metrics["pos_error"], distance, 0.8),
-            "episode_len": env_state.step
+            "episode_len": env_state.step + 1
         }
         return reward, done, metrics
 
