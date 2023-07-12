@@ -13,7 +13,7 @@ from flax.training.train_state import TrainState
 
 from jaxav import CONFIG_PATH
 from jaxav.base import RolloutWrapperV0
-from jaxav.envs import Hover, Track
+from jaxav.envs import ENVS
 from jaxav.learning.ppo import PPOPolicy
 
 from omegaconf import DictConfig
@@ -21,12 +21,14 @@ import pprint
 import logging
 
 
-# @hydra.main(config_path=CONFIG_PATH, config_name="eval", version_base=None)
-def main():
-    wandb.init()
-    artifact: wandb.Artifact = wandb.use_artifact("btx0424/jaxav/Track-PPOPolicy:v0")
+@hydra.main(config_path=CONFIG_PATH, config_name="eval", version_base=None)
+def main(cfg: DictConfig):
+    wandb.init(job_type="eval")
+    artifact: wandb.Artifact = wandb.use_artifact(
+        f"btx0424/jaxav/{cfg.env.name}-PPOPolicy:latest"
+    )
     artifact_dir = artifact.download()
-    cfg = DictConfig(artifact.metadata)
+    atrifact_cfg = DictConfig(artifact.metadata)
     
     checkpoint_manager = CheckpointManager(
         artifact_dir,
@@ -38,17 +40,17 @@ def main():
     train_state = checkpoint["train_state"]
 
     drone = os.path.join(os.path.dirname(__file__), "../jaxav/asset/hummingbird.yaml")
-    env = Track(drone)
-    # env = Hover(drone)
-    policy = PPOPolicy(cfg.algo)
-    collector = RolloutWrapperV0(env, policy, 800)
+    env = ENVS[cfg.env.name.lower()](drone)
+
+    policy = PPOPolicy(atrifact_cfg.algo)
+    collector = RolloutWrapperV0(env, policy, 500)
 
     @jax.jit
     def batch_rollout(env_params, policy_params, init, key):
         _batch_rollout = jax.vmap(collector.rollout, in_axes=(0, None, 0, 0))
         return _batch_rollout(env_params, policy_params, init, jax.random.split(key, num_envs))
 
-    key = jax.random.PRNGKey(0)
+    key = jax.random.PRNGKey(cfg.seed)
     num_envs = cfg.env.num_envs
     env_params = jax.vmap(env.init)(jax.random.split(key, num_envs))
     carry = jax.vmap(collector.init)(env_params, jax.random.split(key, num_envs))
@@ -64,13 +66,13 @@ def main():
     pprint.pprint(info)
     
     from jaxav.utils.pytree import tree_unbind, to_numpy
-    import time
-    print(time.perf_counter())
-    traj = jax.tree_map(lambda x: x[1, ::2], to_numpy(batch.env_state))
-    traj = tree_unbind(traj)
-    print(time.perf_counter())
-    with open("eval.html", "w") as f:
-        f.write(env.render_matplotlib(traj).to_jshtml())
+    from tqdm import tqdm
+    traj_batch = to_numpy(batch.env_state)
+    for i in tqdm(range(cfg.vis_traj_num)):
+        traj = jax.tree_map(lambda x: x[i, ::2], traj_batch)
+        traj = tree_unbind(traj)
+        with open(f"eval_{i}.html", "w") as f:
+            f.write(env.render_matplotlib(traj).to_jshtml())
     
 
 

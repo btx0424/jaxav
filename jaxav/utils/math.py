@@ -202,6 +202,15 @@ def lerp(start: ArrayLike, end: ArrayLike, weight: Union[ArrayLike, float]):
 def uniform(key: jax.random.KeyArray, low: ArrayLike, high: ArrayLike):
     return jax.random.uniform(key) * (high-low) + low
 
+
 def sign(key: jax.random.KeyArray):
     return jnp.sign(jax.random.normal(key))
+
+
+def heading(quat: ArrayLike):
+    return quat_rotate(jnp.array([1., 0., 0.]), quat)
+
+
+def up(quat: ArrayLike):
+    return quat_rotate(jnp.array([0., 0., 1.]), quat)
 

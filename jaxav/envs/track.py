@@ -22,8 +22,13 @@ class EnvState(_EnvState):
     traj_a: ArrayLike # scaling
 
     ref_pos: ArrayLike
+    ref_heading: ArrayLike
     distance: ArrayLike
-    heading: ArrayLike
+
+
+@struct.dataclass
+class EnvParams:
+    rotor_dir_flip: float
 
 
 def lemniscate(t: ArrayLike, c: ArrayLike):
@@ -50,14 +55,17 @@ class Track(EnvBase):
 
         self.action_space = Box(-1, 1, (4,))
         self.observation_space = Box(
-            -jnp.inf, jnp.inf, (16 + self.FUTURE_REF_STEPS,)
+            -jnp.inf, jnp.inf, (15 + self.FUTURE_REF_STEPS,)
         )
         self.reset_thres = 1.
     
     def init(self, key):
-        return None
+        env_params = EnvParams(
+            rotor_dir_flip=0.5
+        )
+        return env_params
 
-    def reset(self, params, key: jax.random.KeyArray):
+    def reset(self, params: EnvParams, key: jax.random.KeyArray):
         keys = jax.random.split(key, 5)
         traj_w = uniform(keys[0], 0.8, 1.1) * sign(keys[0])
         traj_c = uniform(keys[1], -0.6, 0.6)
@@ -70,7 +78,12 @@ class Track(EnvBase):
             uniform(keys[4], jnp.array([0., 0., 0.]), jnp.array([0., 0., 2*jnp.pi]))
         )
 
-        drone_state = self.template_state.replace(pos=pos, rot=rot)
+        drone_state = self.template_state
+        rotor_dir_flip = jnp.where(jax.random.uniform(key, (1,)) < params.rotor_dir_flip, -1., 1.)
+        drone_state = drone_state.replace(
+            pos=pos, rot=rot,
+            rotor_dir=drone_state.rotor_dir # * rotor_dir_flip
+        )
         env_state = EnvState(
             drone=drone_state, 
             max_episode_len=800,
@@ -84,8 +97,8 @@ class Track(EnvBase):
                 "episode_len": 0,
             },
             ref_pos=pos,
+            ref_heading=None,
             distance=0.,
-            heading=drone_state.heading
         )
         obs, env_state = self._obs(env_state)
 
@@ -102,10 +115,10 @@ class Track(EnvBase):
         distance = env_state.distance
         reward_tracking = jnp.exp(- 1.6 * distance)
         reward_heading = jnp.dot(
-            env_state.heading[:2], 
+            env_state.ref_heading[:2], 
             normalize(env_state.drone.heading[:2])[0]
         )
-        reward = (reward_tracking + 0. * reward_heading)[None]
+        reward = (reward_tracking + 0.5 * reward_heading)[None]
         done = (
             (env_state.step == env_state.max_episode_len)
             | (distance > self.reset_thres)
@@ -133,10 +146,11 @@ class Track(EnvBase):
             self.T0 + scale_time(t), env_state.traj_c
         )
         x = env_state.traj_a * jax.vmap(quat_rotate, in_axes=(0, None))(x, env_state.traj_q)
-        traj_heading, _ = normalize(jnp.zeros(3).at[:2].set((x[1]-x[0])[:2]))
+        ref_heading = normalize((x[1]-x[0])[:2])[0]
+        xy_heading = normalize(env_state.drone.heading[:2])[0]
         obs = jnp.concatenate([
             jnp.reshape(x - env_state.drone.pos, -1),
-            traj_heading-env_state.drone.heading,
+            ref_heading-xy_heading,
             env_state.drone.rot,
             env_state.drone.vel,
             env_state.drone.angvel,
@@ -146,14 +160,16 @@ class Track(EnvBase):
 
         return obs, env_state.replace(
             ref_pos=x[0],
+            ref_heading=ref_heading,
             distance=distance, 
-            heading=traj_heading
         )
 
     def render_matplotlib(self, states: Sequence[EnvState]):
         import matplotlib.pyplot as plt
         import matplotlib.animation as animation
         import numpy as np
+        from jaxav.utils.visualization import Drone, Traj3D
+
         states = jax.tree_map(np.array, states)
         
         fig = plt.figure()
@@ -164,41 +180,13 @@ class Track(EnvBase):
         ax.plot([0, 1], [0, 0], [0, 0])
 
         state = states[0]
-
-        transform = Transform(state.drone.pos, state.drone.rot)
-        arms = np.stack([
-            np.zeros_like(state.drone.rotor_trans), 
-            state.drone.rotor_trans
-        ], axis=-2)
-        arms = transform(arms)
-
-        arm_lines = [ax.plot(*arm.T)[0] for arm in arms]
         ref_pos = ax.scatter(*state.ref_pos)
-
-        class Traj3D:
-            def __init__(self, ax, x0):
-                self.traj = [x0]
-                self.line, = ax.plot(*x0.T)
-            
-            def update(self, x):
-                self.traj.append(x)
-                x, y, z = zip(*self.traj)
-                self.line.set_data(x, y)
-                self.line.set_3d_properties(z)
-        
+        drone = Drone(ax, state.drone)
         drone_traj = Traj3D(ax, state.drone.pos)
         ref_traj = Traj3D(ax, state.ref_pos)
 
         def update(state: EnvState):
-            transform = Transform(state.drone.pos, state.drone.rot)
-            arms = np.stack([
-                np.zeros_like(state.drone.rotor_trans), 
-                state.drone.rotor_trans
-            ], axis=-2)
-            arms = transform(arms)
-            for arm_line, arm in zip(arm_lines, arms):
-                arm_line.set_data(*arm.T[:2])
-                arm_line.set_3d_properties(arm.T[2])
+            drone.update(state.drone)
             drone_traj.update(state.drone.pos)
             ref_traj.update(state.ref_pos)
             ref_pos.set_offsets(state.ref_pos[:2])

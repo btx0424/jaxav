@@ -2,8 +2,7 @@ import jax
 import jax.numpy as jnp
 
 from jaxav import CONFIG_PATH
-from jaxav.envs.hover import Hover
-from jaxav.envs.track import Track
+from jaxav.envs import ENVS
 from jaxav.base import RolloutWrapperV0
 from jaxav.learning.ppo import PPOPolicy
 from jaxav.learning.ppo_rnn import PPOPolicyRNN
@@ -29,16 +28,18 @@ import hydra
 
 from omegaconf import OmegaConf, DictConfig
 
+
 @hydra.main(config_path=CONFIG_PATH, config_name="train", version_base=None)
 def main(cfg: DictConfig):
     OmegaConf.resolve(cfg)
     time_str = datetime.datetime.now().strftime("%m-%d_%H-%M")
     run = wandb.init(
         project=cfg.wandb.project,
-        name=f"Hover-{time_str}",
+        name=f"{cfg.env.name}-{time_str}",
         mode=cfg.wandb.mode,
         config=OmegaConf.to_container(cfg)
     )
+    pprint.pprint(OmegaConf.to_container(cfg))
 
     drone = os.path.join(os.path.dirname(__file__), "../jaxav/asset/hummingbird.yaml")
 
@@ -48,8 +49,7 @@ def main(cfg: DictConfig):
     # policy = PPOPolicyRNN(cfg.algo)
     # policy = PPOPolicyTCN(cfg.algo)
 
-    # base_env = Hover(drone)
-    base_env = Track(drone)
+    base_env = ENVS[cfg.env.name.lower()](drone)
     # transform = History(32)
     # env = TransformedEnv(base_env, transform)
     env = base_env

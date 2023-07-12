@@ -50,3 +50,47 @@ def render(states: Sequence[DroneState]):
     )
     return anim
 
+
+class Traj3D:
+    """
+    Helper class for visualizing a trajectory in matplotlib animation.
+    """
+    def __init__(self, ax, x0):
+        self.traj = [x0]
+        self.line = ax.plot(*x0.T)[0]
+    
+    def update(self, x):
+        self.traj.append(x)
+        x, y, z = zip(*self.traj)
+        self.line.set_data(x, y)
+        self.line.set_3d_properties(z)
+        return self.line
+
+
+class Drone:
+    """
+    Helper class for visualizing a multirotor in matplotlib animation.
+    """
+    def __init__(self, ax, s0: DroneState):
+        self.arm_lines = [ax.plot(*arm.T, "--")[0] for arm in self._arms(s0)]
+        heading = np.stack([s0.pos, s0.pos+s0.heading], axis=-2)
+        self.heading_line = ax.plot(*heading.T, "--")[0]
+
+    def _arms(self, state: DroneState):
+        transform = Transform(state.pos, state.rot)
+        arms = np.stack([
+            np.zeros_like(state.rotor_trans), 
+            state.rotor_trans
+        ], axis=-2)
+        arms = transform(arms)
+        return arms
+    
+    def update(self, state: DroneState):
+        for arm_line, arm in zip(self.arm_lines, self._arms(state)):
+            arm_line.set_data(*arm.T[:2])
+            arm_line.set_3d_properties(arm.T[2])
+        heading = np.stack([state.pos, state.pos+state.heading], axis=-2)
+        self.heading_line.set_data(*heading.T[:2])
+        self.heading_line.set_3d_properties(heading.T[2])
+        return self.arm_lines
+

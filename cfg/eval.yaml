@@ -1,2 +1,6 @@
-wandb:
-  id: ???
+env:
+  num_envs: 1024
+  name: ???
+
+seed: 0
+vis_traj_num: 5
