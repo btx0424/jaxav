@@ -20,7 +20,7 @@ class EnvState:
 
 class EnvBase:
     def __init__(self) -> None:
-        pass
+        self.MAX_EPISODE_LEN: int
     
     def init(self, key: jax.random.KeyArray):
         pass

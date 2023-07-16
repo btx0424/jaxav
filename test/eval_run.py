@@ -15,10 +15,19 @@ from jaxav import CONFIG_PATH
 from jaxav.base import RolloutWrapperV0
 from jaxav.envs import ENVS
 from jaxav.learning.ppo import PPOPolicy
+from jaxav.learning.ppo_rnn import PPOPolicyRNN
+from jaxav.learning.ppo_tcn import PPOPolicyTCN
+from jaxav.transform import (
+    TransformedEnv, History
+)
 
 from omegaconf import DictConfig
 import pprint
 import logging
+
+import matplotlib
+import matplotlib.animation as animation
+matplotlib.rcParams['animation.embed_limit'] = 2**128
 
 
 @hydra.main(config_path=CONFIG_PATH, config_name="eval", version_base=None)
@@ -28,7 +37,7 @@ def main(cfg: DictConfig):
         f"btx0424/jaxav/{cfg.env.name}-PPOPolicy:latest"
     )
     artifact_dir = artifact.download()
-    atrifact_cfg = DictConfig(artifact.metadata)
+    artifact_cfg = DictConfig(artifact.metadata)
     
     checkpoint_manager = CheckpointManager(
         artifact_dir,
@@ -42,8 +51,12 @@ def main(cfg: DictConfig):
     drone = os.path.join(os.path.dirname(__file__), "../jaxav/asset/hummingbird.yaml")
     env = ENVS[cfg.env.name.lower()](drone)
 
-    policy = PPOPolicy(atrifact_cfg.algo)
-    collector = RolloutWrapperV0(env, policy, 500)
+    policy = PPOPolicy(artifact_cfg.algo)
+    # policy = PPOPolicyRNN(artifact_cfg.algo)
+    # policy = PPOPolicyTCN(artifact_cfg.algo)
+
+
+    collector = RolloutWrapperV0(env, policy, env.MAX_EPISODE_LEN)
 
     @jax.jit
     def batch_rollout(env_params, policy_params, init, key):
@@ -68,12 +81,13 @@ def main(cfg: DictConfig):
     from jaxav.utils.pytree import tree_unbind, to_numpy
     from tqdm import tqdm
     traj_batch = to_numpy(batch.env_state)
+    writer = animation.FFMpegWriter(fps=30)
+
     for i in tqdm(range(cfg.vis_traj_num)):
         traj = jax.tree_map(lambda x: x[i, ::2], traj_batch)
         traj = tree_unbind(traj)
-        with open(f"eval_{i}.html", "w") as f:
-            f.write(env.render_matplotlib(traj).to_jshtml())
-    
+        anim = env.render_matplotlib(traj)
+        anim.save(f"eval_{i}.mp4", writer=writer)
 
 
 if __name__ == "__main__":

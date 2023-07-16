@@ -134,7 +134,8 @@ def step(state: DroneState, target_thro: ArrayLike, dt: float=0.02):
     angvel = state.angvel + dt * angacc
 
     pos = state.pos + dt * vel
-    rot = normalize(state.rot + dt * 0.5 * quat_mul(state.rot, jnp.ones(4).at[1:].set(angvel)))[0]
+    rot = normalize(state.rot + dt * 0.5 * quat_mul(state.rot, jnp.zeros(4).at[1:].set(angvel)))[0]
+    # rot = normalize(state.rot + dt * 0.5 * quat_mul(state.rot, jnp.ones(4).at[1:].set(angvel)))[0]
 
     return state.replace(
         pos=pos, rot=rot,

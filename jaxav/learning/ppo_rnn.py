@@ -16,7 +16,7 @@ import tensorflow_probability.substrates.jax.distributions as D
 from typing import Callable, Any, Tuple
 
 from jaxav.base import Transition
-from jaxav.learning.common import GAE
+from jaxav.learning.common import GAE, ValueNorm, RunningStats
 from jaxav.learning.ppo import PPOPolicyOutput
 
 
@@ -68,16 +68,23 @@ class ActorCriticRNN(nn.Module):
             1, kernel_init=orthogonal(1.0), bias_init=constant(0.0)
         )(critic)
 
-        return rnn_state, (pi, jnp.squeeze(critic, axis=-1))
+        return rnn_state, (pi, critic)
+
+
+class PPOTrainState(TrainState):
+    value_stats: RunningStats
 
 
 class PPOPolicyRNN:
 
-    def __init__(self):
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.clip_eps = self.cfg.clip_eps
+        self.num_minibatches = self.cfg.num_minibatches
+        self.entropy_coef = self.cfg.entropy_coef
         self.network = ActorCriticRNN(4, activation="elu")
+        self.value_norm = ValueNorm()
         self.gae = GAE(0.99, 0.95)
-        self.clip_eps = 0.1
-        self.num_minibatches = 8
         self.seq_len = 64
 
     def init(self, obs, key):
@@ -94,10 +101,11 @@ class PPOPolicyRNN:
             variable_broadcast="params",
             split_rngs={"params": False},
         )(4, activation="elu")
-        train_state = TrainState.create(
+        train_state = PPOTrainState.create(
             apply_fn=apply_fn.apply,
             params=self.network.init(key, rnn_state, obs, is_init),
-            tx=tx
+            tx=tx,
+            value_stats=RunningStats.zero()
         )
         return train_state
 
@@ -113,21 +121,40 @@ class PPOPolicyRNN:
         rnn_state = nn.GRUCell.initialize_carry(key, (), 128)
         return rnn_state
 
-    def update(self, traj_batch: Transition, train_state: TrainState, key):
+    def update(self, traj_batch: Transition, train_state: PPOTrainState, key):
         _, (_, next_val) = self.network.apply(
             train_state.params, 
             traj_batch.policy_state[:, -1],
             traj_batch.next_obs[:, -1],
             traj_batch.next_env_state.is_init[:, [-1]]
         )
-        advantages, returns = jax.vmap(self.gae)(traj_batch, next_val)
+        reward, value, done = (
+            traj_batch.reward, 
+            traj_batch.policy_output.value, 
+            traj_batch.done
+        )
+        info = {}
+        if self.value_norm is not None:
+            value = self.value_norm.denormalize(train_state.value_stats, value)
+            next_val = self.value_norm.denormalize(train_state.value_stats, next_val)
+            advantages, returns = jax.vmap(self.gae)(reward, value, done, next_val)
+            train_state = train_state.replace(
+                value_stats=self.value_norm.update(train_state.value_stats, returns)
+            )
+            returns = self.value_norm.normalize(train_state.value_stats, returns)
+            info["value_mean"] = train_state.value_stats.mean
+        else:
+            advantages, returns = jax.vmap(self.gae)(reward, value, done, next_val)
+
+        advantages = (advantages - jnp.mean(advantages)) / jnp.std(advantages)
 
         batch = (traj_batch, advantages, returns)
         minibatches = self._make_minibatches(batch, key)
-        train_state, losses = jax.lax.scan(
+        train_state, _info = jax.lax.scan(
             self._update_minibatch, train_state, minibatches
         )
-        return train_state, jax.tree_map(jnp.mean, losses)
+        info.update(_info)
+        return train_state, jax.tree_map(jnp.mean, info)
     
     def _make_minibatches(self, batch: Transition, key):
         batch = jax.tree_map(
@@ -167,7 +194,7 @@ class PPOPolicyRNN:
             )
 
             # CALCULATE ACTOR LOSS
-            ratio = jnp.exp(log_prob - transition.policy_output.log_prob)
+            ratio = jnp.exp(log_prob - transition.policy_output.log_prob)[..., None]
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
             loss_actor1 = ratio * advantages
             loss_actor2 = ratio.clip(1.-self.clip_eps, 1.+self.clip_eps) * advantages
@@ -175,8 +202,17 @@ class PPOPolicyRNN:
             loss_actor = loss_actor.mean()
             entropy = pi.entropy().mean()
 
-            total_loss = loss_actor + 0.5 * value_loss
-            return total_loss, {"policy_loss": loss_actor, "value_loss": value_loss, "entropy": entropy}
+            total_loss = loss_actor + value_loss
+            explained_var = 1. - jnp.mean(value_losses) / jnp.var(returns)
+            return (
+                total_loss, 
+                {
+                    "policy_loss": loss_actor, 
+                    "value_loss": value_loss, 
+                    "entropy": entropy,
+                    "explained_var": explained_var
+                }
+            )
         
         grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
         (_, losses), grads = grad_fn(

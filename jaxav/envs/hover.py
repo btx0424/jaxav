@@ -14,6 +14,7 @@ from jax.typing import ArrayLike
 class EnvState(_EnvState):
     drone: DroneState
     ref_heading: ArrayLike
+    rotor_perm: ArrayLike
 
 class Hover(EnvBase):
     def __init__(
@@ -24,6 +25,7 @@ class Hover(EnvBase):
         self.target_pos = jnp.array([0., 0., 2.5])
         self.observation_space = Box(-jnp.inf, jnp.inf, (20,))
         self.action_space = Box(-1, 1, (4,))
+        self.MAX_EPISODE_LEN = 500
     
     def init(self, key):
 
@@ -44,10 +46,15 @@ class Hover(EnvBase):
             pos=init_pos,
             rot=euler_to_quat(init_rpy)
         )
+        # rotor_perm = jax.random.permutation(
+        #     jax.random.PRNGKey(0), jnp.arange(drone_state.rotor_dir.shape[0])
+        # )
+        rotor_perm = jnp.arange(drone_state.rotor_dir.shape[0])
         env_state = EnvState(
             drone=drone_state, 
             ref_heading=heading(euler_to_quat(ref_rpy)),
-            max_episode_len=500,
+            max_episode_len=self.MAX_EPISODE_LEN,
+            rotor_perm=rotor_perm,
             metrics={
                 "pos_error": jnp.array(0.), 
                 "heading": jnp.array(0.),
@@ -58,6 +65,7 @@ class Hover(EnvBase):
         return obs, env_state
     
     def step(self, env_state: EnvState, action):
+        action = action[env_state.rotor_perm]
         env_state = env_state.replace(
             drone=step(env_state.drone, action, 0.02),
             step=env_state.step + 1,
@@ -83,15 +91,18 @@ class Hover(EnvBase):
             env_state.drone.rot,
             env_state.drone.vel,
             env_state.drone.angvel,
-            jnp.full(4, env_state.step / env_state.max_episode_len)
+            jnp.full(4, env_state.step / env_state.max_episode_len),
+            # env_state.rotor_perm  @ jax.random.normal(jax.random.PRNGKey(0), (4, 32))
         ])
         return obs
     
     def _reward_and_done(self, env_state: EnvState):
         distance = jnp.linalg.norm(self.target_pos - env_state.drone.pos)
         reward_pos = jnp.exp(-distance)
-        reward_heading = jnp.dot(env_state.ref_heading, env_state.drone.heading)
-        reward = (reward_pos + 0.5 * reward_heading)[None]
+        reward_heading = (
+            jnp.square(.5*(jnp.dot(env_state.ref_heading, env_state.drone.heading) + 1.))
+        )
+        reward = (reward_pos + reward_pos * reward_heading)[None]
         done = (
             (env_state.step == env_state.max_episode_len)
             | (distance > 4.)
@@ -128,6 +139,9 @@ class Hover(EnvBase):
         def update(state: EnvState):
             drone.update(state.drone)
             drone_traj.update(state.drone.pos)
+            ref_heading = np.stack([self.target_pos, self.target_pos+state.ref_heading], axis=-2)
+            ref_heading_line.set_data(*ref_heading.T[:2])
+            ref_heading_line.set_3d_properties(ref_heading.T[2])
             
         anim = animation.FuncAnimation(
             fig, update, states[1:]
